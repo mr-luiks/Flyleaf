@@ -63,6 +63,8 @@ public unsafe class Demuxer : RunThreadBase
                                     SubtitlesStreams{ get; private set; } = [];
     public ObservableCollection<DataStream>
                                     DataStreams     { get; private set; } = [];
+    public ObservableCollection<AttachmentStream>
+                                    AttachmentStreams{ get; private set; } = [];
     readonly object lockStreams = new();
 
     public List<int>                EnabledStreams  { get; private set; } = [];
@@ -73,6 +75,7 @@ public unsafe class Demuxer : RunThreadBase
     public VideoStream              VideoStream     { get; private set; }
     public SubtitlesStream          SubtitlesStream { get; private set; }
     public DataStream               DataStream      { get; private set; }
+    public AttachmentStream         AttachmentStream{ get; private set; }
 
     // Audio/Video Stream's HLSPlaylist
     internal playlist*              HLSPlaylist     { get; private set; }
@@ -207,6 +210,7 @@ public unsafe class Demuxer : RunThreadBase
             BindingOperations.EnableCollectionSynchronization(VideoStreams,     lockStreams);
             BindingOperations.EnableCollectionSynchronization(SubtitlesStreams, lockStreams);
             BindingOperations.EnableCollectionSynchronization(DataStreams,      lockStreams);
+            BindingOperations.EnableCollectionSynchronization(AttachmentStreams,lockStreams);
 
             BindingOperations.EnableCollectionSynchronization(Chapters,         lockStreams);
         });
@@ -290,6 +294,7 @@ public unsafe class Demuxer : RunThreadBase
                 VideoStreams.Clear();
                 SubtitlesStreams.Clear();
                 DataStreams.Clear();
+                AttachmentStreams.Clear();
                 Programs.Clear();
 
                 Chapters.Clear();
@@ -750,6 +755,11 @@ public unsafe class Demuxer : RunThreadBase
                     DataStreams.Add(new(this, stream));
                     AVStreamToStream.Add(stream->index, DataStreams[^1]);
 
+                    break;
+
+                case AVMediaType.Attachment:
+                    AttachmentStreams.Add(new(this, stream));
+                    AVStreamToStream.Add(stream->index, AttachmentStreams[^1]);
                     break;
 
                 default:
