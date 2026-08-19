@@ -25,7 +25,9 @@ public abstract unsafe class StreamBase : NotifyPropertyChanged
     public long                         StartTime           { get; internal set; }
     public long                         StartTimePts        { get; internal set; }
     public long                         Duration            { get; internal set; }
-    public Dictionary<string, string>   Metadata            { get; internal set; } = [];
+    public Dictionary<string, string>   Metadata            { get; internal set; } = [];    
+    public byte*                        ExtraData           { get; internal set; }
+    public int                          ExtraDataSize       { get; internal set; }
     public MediaType                    Type                { get; internal set; }
 
     protected AVCodecParameters* cp;
@@ -40,7 +42,9 @@ public abstract unsafe class StreamBase : NotifyPropertyChanged
         Codec       = avcodec_get_name(cp->codec_id);
         StreamIndex = AVStream->index;
         Timebase    = av_q2d(AVStream->time_base) * 10000.0 * 1000.0;
-        
+        ExtraData   = cp->extradata;
+        ExtraDataSize = cp->extradata_size;
+
         if (AVStream->start_time != NoTs)
         {
             StartTimePts= AVStream->start_time;
