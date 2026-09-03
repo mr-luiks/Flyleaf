@@ -492,6 +492,12 @@ public unsafe class VideoDecoder : DecoderBase
                 ret = SendAVPacket(packet);
                 if (ret != 0)
                 {
+                    if (isDraining)
+                    {
+                        Status = Status.Ended;
+                        break;
+                    }
+
                     if (ret == AVERROR_EAGAIN)
                     {   // Fast retry => Legitimate decoding errors | Waiting for key packet
                         while (Status == Status.Running && ret == AVERROR_EAGAIN && (packet = vPackets.Dequeue()) != null)
@@ -536,7 +542,6 @@ public unsafe class VideoDecoder : DecoderBase
                 if (CanDebug) Log.Debug("Ignoring non-key packet");
                 av_packet_free(&packet);
                 return AVERROR_EAGAIN;
-                
             }
 
             keyFrameRequired  = checkKeyFrame && packet->pts != startPts;
