@@ -708,7 +708,9 @@ public unsafe class Demuxer : RunThreadBase
         {
             var stream = fmtCtx->streams[i];
             stream->discard = AVDiscard.All;
-            if (stream->codecpar->codec_id == AVCodecID.None && stream->codecpar->codec_type != AVMediaType.Data)
+            if (stream->codecpar->codec_id == AVCodecID.None &&
+                stream->codecpar->codec_type != AVMediaType.Data &&
+                stream->codecpar->codec_type != AVMediaType.Attachment)
             {
                 AVStreamToStream.Add(stream->index, new MiscStream(this, stream));
                 Log.Info($"#[Invalid #{i}] No codec");
