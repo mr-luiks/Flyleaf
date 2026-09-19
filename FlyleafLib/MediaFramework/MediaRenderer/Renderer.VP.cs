@@ -4,10 +4,13 @@ using System.Windows;
 using WPoint = System.Windows.Point;
 
 using Vortice.Direct3D11;
+using Vortice.DXGI;
 using Vortice.Mathematics;
 
 using FlyleafLib.MediaFramework.MediaFrame;
 using FlyleafLib.MediaFramework.MediaStream;
+
+using static FlyleafLib.Utils.NativeMethods;
 
 namespace FlyleafLib.MediaFramework.MediaRenderer;
 
@@ -36,7 +39,10 @@ public unsafe partial class Renderer : IVP
     bool            canFL, canD3;
     VPRequestType   vpRequestsIn, vpRequests; // In: From User | ProcessRequests Copy
 
-    internal unsafe delegate VideoFrame FillPlanesDelegate(ref AVFrame* frame);
+    float           autoMinNits     = 0.203f;
+    float           autoPeakNits    = 203;
+
+    internal delegate VideoFrame FillPlanesDelegate(ref AVFrame* frame);
     internal FillPlanesDelegate FillPlanes;
 
     void IVP.VPRequest(VPRequestType request)
@@ -125,7 +131,17 @@ public unsafe partial class Renderer : IVP
     {   // Called from ProcessRequests (RenderLoop) | lockRenderLoops
         bool wasRunning = VideoDecoder.IsRunning;
         if (wasRunning)
-            VideoDecoder.Pause(); // don't call me from lock (Frames) - deadlock with Runinternal
+        {
+            try
+            {
+                Monitor.Enter(lockRenderLoops);
+                VideoDecoder.Pause(); // don't call me from lock (Frames) - deadlock with Runinternal
+            }
+            finally
+            {
+                Monitor.Exit(lockRenderLoops);
+            }
+        }
 
         lock(Frames)
         {
@@ -202,6 +218,7 @@ public unsafe partial class Renderer : IVP
         var oldVP       = VideoProcessor;
         var vpRequests  = VPRequestType.RotationFlip | VPRequestType.Crop | VPRequestType.UpdatePS; // TBR: we should set them all here as we don't compare with previous states
         VideoProcessor  = VPSelection();
+        isHdr           = false;
 
         if (CanTrace) Log.Trace($"Preparing planes for {scfg.PixelFormatStr} with {VideoProcessor}");
 
@@ -266,12 +283,94 @@ public unsafe partial class Renderer : IVP
         if (CanDebug) Log.Debug($"Prepared planes for {scfg.PixelFormatStr} with {VideoProcessor} [{psCase}]");
     }
 
-    void IVP.MonitorChanged(GPUOutput monitor)
+    void IVP.MonitorChanged()
     {
-        ucfg.MaxVerticalResolutionAuto  = monitor.Height;
-        ucfg.SDRDisplayNitsAuto         = monitor.MaxLuminance;
+        RefreshMonitor();
+
         // currently not used (int accurate instead of double)
         //refreshRateTicks = (int)((1.0 / monitor.RefreshRate) * 1000 * 10000);
+    }
+    void RefreshMonitor()
+    {
+        var output = GetCurrentOutput();
+        if (output == null)
+            return;
+
+        bool updated    = false;
+        float minNits   = 0.203f;
+        float peakNits  = 203.0f;
+
+        try
+        {
+            var desc = output.Description;
+
+            DisplayConfig.TryGetHDRInfo(desc.DeviceName, out var hdr);
+
+            using var output6 = output.QueryInterfaceOrNull<IDXGIOutput6>();
+
+            if (output6 != null)
+            {
+                var desc1 = output6.Description1;
+                
+                minNits = desc1.MinLuminance;
+                if (!hdr.Supported)
+                    peakNits = desc1.MaxLuminance;
+
+                var coord = desc1.DesktopCoordinates;
+                if (ucfg.MaxVerticalResolutionAuto != coord.Bottom - coord.Top)
+                {
+                    updated = true;
+                    ucfg.MaxVerticalResolutionAuto = coord.Bottom - coord.Top;
+                }
+            }
+
+            if (hdr.Enabled && hdr.SDRWhiteNits is float sdrWhite)
+                peakNits = sdrWhite;
+        }
+        catch { }
+        finally
+        {
+            output.Dispose();
+        }
+
+        if (autoMinNits != minNits)
+        {
+            autoMinNits = minNits;
+            updated = true;
+        }
+
+        if (autoPeakNits != peakNits)
+        {
+            autoPeakNits = peakNits;
+            updated = true;
+        }
+
+        if (updated)
+        {
+            if (ucfg.TargetMaxNits <= 0)
+            {
+                psData.TargetMinNits    = autoMinNits;
+                psData.TargetPeakNits   = autoPeakNits;
+            }
+
+            FLHDRDetectReset();
+            VPRequest(VPRequestType.UpdatePS);
+        }
+
+    }
+    IDXGIOutput GetCurrentOutput()
+    {
+        nint monitor = MonitorFromWindow(SwapChain.ControlHwnd, MonitorOptions.MONITOR_DEFAULTTONEAREST);
+
+        for (uint i = 0; DXGIAdapter.EnumOutputs(i, out var output).Success; i++)
+        {
+            if (output.Description.Monitor == monitor)
+                return output;
+
+            output.Dispose();
+        }
+
+        return null;
     }
     void IVP.UpdateSize(int width, int height)
     {
@@ -415,10 +514,9 @@ enum VPRequestType
     Viewport        = 1 << 6,
 
     Deinterlace     = 1 << 7,   // D3D11
-    HDRtoSDR        = 1 << 8,   // Flyleaf
-    UpdatePS        = 1 << 9,   // Flyleaf
-    UpdateVS        = 1 << 10,  // Flyleaf
-    Pano360         = 1 << 11,  // Flyleaf - 360 Panoramic params update
+    UpdatePS        = 1 << 8,   // Flyleaf
+    UpdateVS        = 1 << 9,  // Flyleaf
+    Pano360         = 1 << 10,  // Flyleaf - 360 Panoramic params update
 }
 
 public class VPConfig : NotifyPropertyChanged
@@ -618,7 +716,7 @@ internal interface IVP
 
     void VPRequest(VPRequestType request);
     void UpdateSize(int width, int height);
-    void MonitorChanged(GPUOutput monitor);
+    void MonitorChanged();
 }
 
 /// <summary>

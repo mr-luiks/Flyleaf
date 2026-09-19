@@ -7,6 +7,7 @@ using Vortice.DXGI;
 using Vortice.Mathematics;
 
 using FlyleafLib.MediaFramework.MediaFrame;
+using ID3D11Texture2D = Vortice.Direct3D11.ID3D11Texture2D;
 
 namespace FlyleafLib.MediaFramework.MediaRenderer;
 
@@ -32,6 +33,12 @@ public unsafe partial class Renderer
 
     ID3D11Buffer    panoBuffer;
     PanoBufferType  panoData  = new() { PanoParams = new(0.5f, 0.5f, 0.5f, 90f), AspectRatio = 1.778f };
+
+    ID3D11ShaderResourceView
+                    iccSrv;
+    ID3D11Texture2D iccTxt;
+    static readonly nint    // TBR: But consider global support not just here* OpenMonitorProfile(SwapChain.Monitor.Hwnd)
+                    iccDst  = NativeMethods.OpenSRgbProfile();
 
     bool            vflip;
 
@@ -92,6 +99,95 @@ public unsafe partial class Renderer
         }
     };
 
+    static BufferDescription psDesc = new()
+    {
+        Usage           = ResourceUsage.Default,
+        BindFlags       = BindFlags.ConstantBuffer,
+        CPUAccessFlags  = CpuAccessFlags.None,
+        ByteWidth       = (uint)((sizeof(PSBufferType) + 15) & ~15)
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct PSBufferType
+    {
+        public int   CoeffsIndex;
+
+        public float Brightness;    // -0.5  to 0.5     (0.0 default)
+        public float Contrast;      //  0.0  to 2.0     (1.0 default)
+        public float Hue;           // -3.14 to 3.14    (0.0 default)
+        public float Saturation;    //  0.0  to 2.0     (1.0 default)
+
+        public float UVOffset;
+
+        public ToneSplineParams Spline;
+
+        public float SourceMinNits;
+        public float SourcePeakNits;
+        public float TargetMinNits;
+        public float TargetPeakNits;
+
+        public PSBufferType()
+        {
+            Brightness      = 0;
+            Contrast        = 1;
+            Hue             = 0;
+            Saturation      = 1;
+
+            TargetMinNits   = 0.203f;
+            TargetPeakNits  = 203;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct ToneSplineParams
+    {
+        public float SrcPivot;
+        public float DstPivot;
+
+        public float Pa;
+        public float Slope;
+
+        public float Qa;
+        public float Qb;
+    }
+
+    internal static BufferDescription vsDesc = new()
+    {
+        Usage           = ResourceUsage.Default,
+        BindFlags       = BindFlags.ConstantBuffer,
+        CPUAccessFlags  = CpuAccessFlags.None,
+        ByteWidth       = (uint)((sizeof(VSBufferType) + 15) & ~15)
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VSBufferType
+    {
+        public Matrix4x4    Matrix; // Rotation | HV Flip
+        public Vector4      Crop;
+        
+        public VSBufferType()
+        {
+            Matrix  = Matrix4x4.Identity;
+            Crop    = new(0, 0, 1, 1);
+        }
+    }
+
+    static BufferDescription panoDesc = new()
+    {
+        Usage           = ResourceUsage.Default,
+        BindFlags       = BindFlags.ConstantBuffer,
+        CPUAccessFlags  = CpuAccessFlags.None,
+        ByteWidth       = (uint)((sizeof(PanoBufferType) + 15) & ~15)
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PanoBufferType
+    {
+        public Vector4 PanoParams;  // rotationX, rotationY, zoom, fov
+        public float AspectRatio;
+        float _pad1, _pad2, _pad3;  // 16-byte alignment
+    }
+
     void FLInit()
     {
         for (int i = 0; i < txtDesc.Length; i++)
@@ -122,10 +218,14 @@ public unsafe partial class Renderer
         vsMain          = device.CreateVertexShader(ShaderCompiler.VSBlob);
         vsSimple        = device.CreateVertexShader(ShaderCompiler.VSSimpleBlob);
         rsStateHVFlip   = device.CreateRasterizerState(new(CullMode.None, FillMode.Solid));
-
+        
         // TBR: Currently Bitmap Subs only (possible ChildRenderer too - might separate them or create separate PS for it)
         blendStateAlpha = device.CreateBlendState(blendDesc);
         psShader["rgba"]= ShaderCompiler.CompilePS(device, "rgba", "color = float4(Texture1.Sample(Sampler, input.Texture).rgba);");
+
+        iccTxt          = device.CreateTexture2D(Format.R16G16B16A16_UNorm, 33 * 33, 33);
+        iccSrv          = device.CreateShaderResourceView(iccTxt);
+        context.PSSetShaderResource     (4, iccSrv);
         
         context.IASetVertexBuffer       (0, vertexBuffer, sizeof(float) * 5);
         context.IASetInputLayout        (inputLayout);
@@ -211,29 +311,28 @@ public unsafe partial class Renderer
         vpRequests &= ~VPRequestType.Crop;
         vpRequests |=  VPRequestType.Viewport | VPRequestType.UpdateVS;
     }
-    void FLSetHDRtoSDR()
+    
+    internal void FLUpdateTargetNits()
     {
-        psData.Tonemap = ucfg.HDRtoSDRMethod;
+        FLHDRDetectReset();
 
-        switch (psData.Tonemap)
-        {
-            case HDRtoSDRMethod.Hable:
-                psData.HDRTone = 10_000f / ucfg.SDRDisplayNits;
-                break;
-
-            case HDRtoSDRMethod.Reinhard:
-                psData.HDRTone = (10_000f / ucfg.SDRDisplayNits) / 2f;
-                break;
-
-            case HDRtoSDRMethod.Aces:
-                psData.HDRTone = (10_000f / ucfg.SDRDisplayNits) / 7f;
-                break;
-        }
-
-        vpRequests &= ~VPRequestType.HDRtoSDR;
-        vpRequests |=  VPRequestType.UpdatePS;
+        psData.TargetPeakNits   = ucfg.TargetMaxNits >  0 ? ucfg.TargetMaxNits : autoPeakNits;
+        psData.TargetMinNits    = ucfg.TargetMinNits >= 0 ? ucfg.TargetMinNits : (psData.TargetPeakNits * autoMinNits / autoPeakNits); // auto min: keep contrast?
+        
+        VPRequest(VPRequestType.UpdatePS);
     }
-
+    void FLSetPano360()
+    {
+        var pano = ucfg.Pano360;
+        panoData.PanoParams = new((float)pano._rotationX, (float)pano._rotationY,
+                                 (float)pano._zoom, (float)pano._fov);
+        // aspectRatio based on control (viewport) size, not video source size
+        panoData.AspectRatio = ControlWidth > 0 && ControlHeight > 0
+            ? (float)ControlWidth / ControlHeight : 1.778f;
+        context.UpdateSubresource(panoData, panoBuffer);
+        vpRequests &= ~VPRequestType.Pano360;
+    }
+    
     void FLProcessRequests()
     {
         while (vpRequestsIn != VPRequestType.Empty)
@@ -267,9 +366,6 @@ public unsafe partial class Renderer
             if (vpRequests.HasFlag(VPRequestType.Viewport))
                 FLSetViewport();
 
-            if (vpRequests.HasFlag(VPRequestType.HDRtoSDR))
-                FLSetHDRtoSDR();
-
             if (vpRequests.HasFlag(VPRequestType.Pano360))
                 FLSetPano360();
 
@@ -277,8 +373,7 @@ public unsafe partial class Renderer
                 context.UpdateSubresource(vsData, vsBuffer);
 
             if (vpRequests.HasFlag(VPRequestType.UpdatePS))
-                context.UpdateSubresource(psData, psBuffer);   
-                
+                context.UpdateSubresource(psData, psBuffer);
         }
     }
     void FLRender(VideoFrame frame)
@@ -289,6 +384,7 @@ public unsafe partial class Renderer
         context.OMSetRenderTargets(SwapChain.BackBufferRtv);
         context.ClearRenderTargetView(SwapChain.BackBufferRtv, ucfg.flBackColor);
         context.PSSetShaderResources(0, frame.SRV);
+        FLHDRDetect();
         context.Draw(6, 0);
 
         if (context2d != null)
@@ -298,9 +394,11 @@ public unsafe partial class Renderer
     }
     void FLRender(ID3D11ShaderResourceView[] srvs, ID3D11RenderTargetView rtv, Viewport view)
     {
+        context.PSSetShaderResources(0, srvs);
+        FLHDRDetectReset();
+        FLHDRDetect();
         context.OMSetRenderTargets(rtv);
         context.RSSetViewport(view);
-        context.PSSetShaderResources(0, srvs);
         context.Draw(6, 0);
     }
 
@@ -310,6 +408,7 @@ public unsafe partial class Renderer
         // TODO: Dispose filters?*
         SwsDispose();
         SubsDispose();
+        FLHDRDispose();
 
         if (snapshot != null)
         {
@@ -333,86 +432,7 @@ public unsafe partial class Renderer
         vsSimple.       Dispose();
         rsStateHVFlip.  Dispose();
         blendStateAlpha.Dispose();
-    }
-
-    static BufferDescription psDesc = new()
-    {
-        Usage           = ResourceUsage.Default,
-        BindFlags       = BindFlags.ConstantBuffer,
-        CPUAccessFlags  = CpuAccessFlags.None,
-        ByteWidth       = (uint)(sizeof(PSBufferType) + (16 - (sizeof(PSBufferType) % 16)))
-    };
-
-    [StructLayout(LayoutKind.Sequential)]
-    struct PSBufferType
-    {
-        public int CoeffsIndex;
-
-        public float Brightness;    // -0.5  to 0.5     (0.0 default)
-        public float Contrast;      //  0.0  to 2.0     (1.0 default)
-        public float Hue;           // -3.14 to 3.14    (0.0 default)
-        public float Saturation;    //  0.0  to 2.0     (1.0 default)
-
-        public float UVOffset;
-        public HDRtoSDRMethod Tonemap;
-        public float HDRTone;
-
-        public PSBufferType()
-        {
-            Brightness  = 0;
-            Contrast    = 1;
-            Hue         = 0;
-            Saturation  = 1;
-            Tonemap     = HDRtoSDRMethod.Hable;
-        }
-    }
-
-    internal static BufferDescription vsDesc = new()
-    {
-        Usage           = ResourceUsage.Default,
-        BindFlags       = BindFlags.ConstantBuffer,
-        CPUAccessFlags  = CpuAccessFlags.None,
-        ByteWidth       = (uint)(sizeof(VSBufferType) + (16 - (sizeof(VSBufferType) % 16)))
-    };
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct VSBufferType
-    {
-        public Matrix4x4    Matrix; // Rotation | HV Flip
-        public Vector4      Crop;
-        
-        public VSBufferType()
-        {
-            Matrix  = Matrix4x4.Identity;
-            Crop    = new(0, 0, 1, 1);
-        }
-    }
-
-    static BufferDescription panoDesc = new()
-    {
-        Usage           = ResourceUsage.Default,
-        BindFlags       = BindFlags.ConstantBuffer,
-        CPUAccessFlags  = CpuAccessFlags.None,
-        ByteWidth       = (uint)(sizeof(PanoBufferType) + (16 - (sizeof(PanoBufferType) % 16)))
-    };
-
-    [StructLayout(LayoutKind.Sequential)]
-    internal struct PanoBufferType
-    {
-        public Vector4 PanoParams;  // rotationX, rotationY, zoom, fov
-        public float AspectRatio;
-        float _pad1, _pad2, _pad3;  // 16-byte alignment
-    }
-
-    void FLSetPano360()
-    {
-        var pano = ucfg.Pano360;
-        panoData.PanoParams = new((float)pano._rotationX, (float)pano._rotationY,
-                                 (float)pano._zoom, (float)pano._fov);
-        // aspectRatio based on control (viewport) size, not video source size
-        panoData.AspectRatio = ControlWidth > 0 && ControlHeight > 0
-            ? (float)ControlWidth / ControlHeight : 1.778f;
-        context.UpdateSubresource(panoData, panoBuffer);
-        vpRequests &= ~VPRequestType.Pano360;
+        iccSrv.         Dispose();
+        iccTxt.         Dispose();
     }
 }

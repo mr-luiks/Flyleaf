@@ -8,7 +8,7 @@
 	<PackageIconUrl />
 	<RepositoryUrl></RepositoryUrl>
 	<Description>Media Player .NET Library for WinUI 3/WPF/WinForms (based on FFmpeg/DirectX)</Description>
-	<Version>3.11.3</Version>
+	<Version>3.11.8</Version>
 	<Authors>SuRGeoNix</Authors>
 	<Copyright>SuRGeoNix © 2026</Copyright>
 	<PackageLicenseExpression>LGPL-3.0-or-later</PackageLicenseExpression>
@@ -17,14 +17,9 @@
 	<IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageReleaseNotes>
-		- Engine: Fixes minor memory leaks for Audio/Video devices
-		- Seek: Stability and performance improvements
-		- HTTP/HLS: Stability improvements
-		- VideoDecoder: Fixes a possible infinite loop during draining
-
-		[Breaking Changes]
-		- Player.Keys: Introduces OpenPrevItem / OpenNextItem (Ctrl + Up / Down)
-		- Config.Demuxer.FormatOpt: Resets / Minimizes initial format options (Deprecates/defaults: probesize, analyzeduration, extension_picky, reconnect, reconnect_streamed, reconnect_delay_max, rtsp_transport)
+		- Renderer: Adds per-frame HDR min/avg/peak detection for spline tone mapping
+		- Config.Video: Introduces TargetMinNits
+		- Config.Video: Introduces TargetMaxNits (renames HDRBrightness)
 	</PackageReleaseNotes>
   </PropertyGroup>
 

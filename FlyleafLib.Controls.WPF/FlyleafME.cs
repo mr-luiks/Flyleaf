@@ -447,9 +447,7 @@ public class FlyleafME : FlyleafHost, INotifyPropertyChanged
 
         if (result.ToString() == "cancel")
         {
-            Config.Video.HDRtoSDRMethod         = prevConfig.HDRtoSDRMethod;
-            Config.Video.SDRDisplayNitsCustom   = prevConfig.SDRDisplayNitsCustom;
-
+            Config.Video.TargetMaxNits = prevConfig.TargetMaxNits;
             foreach(var filter in saveFilterValues)
                 Config.Video.FLFilters[filter.Key].Value  = filter.Value;
 

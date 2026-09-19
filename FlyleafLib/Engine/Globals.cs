@@ -40,9 +40,9 @@ public enum InputType
 public enum HDRtoSDRMethod // Must match pixel shader
 {
     None,
-    Aces,
-    Hable,
-    Reinhard
+    HLG,
+    PQ,
+    PQSpline
 }
 
 public enum DeInterlace // Must match with VideoFrameFormat
@@ -97,9 +97,7 @@ public enum ColorType
 public enum HDRFormat
 {
     None,
-    DolbyVision,
-    HDR,
-    HDRPlus,
+    HDR10,
     HLG
 }
 public enum UIRefreshType
@@ -138,6 +136,7 @@ public class GPUOutput
     public bool             IsAttached      { get; internal set; }
     public ModeRotation     Rotation        { get; internal set; }
     public float            MaxLuminance    { get; internal set; }
+    public float            MinLuminance    { get; internal set; }
     //public int              RefreshRate     { get; internal set; } // Currently not used
 
     public override string ToString()
@@ -160,7 +159,7 @@ public class GPUAdapter
 
     internal IDXGIAdapter   dxgiAdapter;
 
-    public List<GPUOutput>  GetGPUOutputs()    => Engine.Video.GetGPUOutputs(dxgiAdapter);
+    public List<GPUOutput>  GetGPUOutputs() => VideoEngine.GetGPUOutputs(dxgiAdapter);
 
     public override string  ToString()
         => (Vendor + " " + Description).PadRight(40) + $"[ID: {Id,-6}, LUID: {Luid,-6}, DVM: {GetBytesReadable(VideoMemory),-8}, DSM: {GetBytesReadable(SystemMemory),-8}, SSM: {GetBytesReadable(SharedMemory)}]";

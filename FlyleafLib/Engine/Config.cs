@@ -650,6 +650,18 @@ public class Config : NotifyPropertyChanged
         public int              MaxVerticalResolution       => MaxVerticalResolutionCustom == 0 ? (MaxVerticalResolutionAuto != 0 ? MaxVerticalResolutionAuto : 1080) : MaxVerticalResolutionCustom;
 
         /// <summary>
+        /// Monitor's Minimum Nits (for HDRtoSDR) | Auto: <= 0
+        /// </summary>
+        public float            TargetMinNits               { get => _targetMinNits;    set {  if (Set(ref _targetMinNits, value)) player?.Renderer?.FLUpdateTargetNits(); } }
+        float _targetMinNits = 0;
+
+        /// <summary>
+        /// Monitor's Maximum Nits (for HDRtoSDR) | Auto: < 0
+        /// </summary>
+        public float            TargetMaxNits               { get => _targetMaxNits;    set {  if (Set(ref _targetMaxNits, value)) player?.Renderer?.FLUpdateTargetNits(); } }
+        float _targetMaxNits = -1;
+
+        /// <summary>
         /// Sets Super Resolution (Nvidia / Intel - D3D11VP only)
         /// </summary>
         public bool             SuperResolution             { get => _SuperResolution;  set { if (Set(ref _SuperResolution, value)) player?.Renderer?.VPRequest(VPRequestType.Viewport); } }
@@ -685,37 +697,6 @@ public class Config : NotifyPropertyChanged
         /// </summary>
         public bool             DoubleRate                  { get => _DoubleRate;       set => Set(ref _DoubleRate, value); }
         bool _DoubleRate = true;
-
-        /// <summary>
-        /// The HDR to SDR method that will be used by the pixel shader
-        /// </summary>
-        public HDRtoSDRMethod   HDRtoSDRMethod              { get => _HDRtoSDRMethod;   set { if (Set(ref _HDRtoSDRMethod, value))  player?.Renderer?.VPRequest(VPRequestType.HDRtoSDR); } }
-        HDRtoSDRMethod _HDRtoSDRMethod = HDRtoSDRMethod.Hable;
-
-       /// <summary>
-        /// SDR Display Peak Luminance - tonemap for HDR to SDR (based on Auto/Custom)
-        /// </summary>
-        [JsonIgnore]
-        public float SDRDisplayNits
-        {
-            get => SDRDisplayNitsCustom == 0 ? (SDRDisplayNitsAuto != 0 ? SDRDisplayNitsAuto : 200) : SDRDisplayNitsCustom;
-            set => SDRDisplayNitsCustom = value;
-        }
-
-        /// <summary>
-        /// SDR Display Peak Luminance - tonemap for HDR to SDR (Recommended)
-        /// </summary>
-        [JsonIgnore]
-        public float            SDRDisplayNitsAuto          { get => _SDRDisplayNitsAuto;   set { if (Set(ref _SDRDisplayNitsAuto, value) && _SDRDisplayNitsCustom == 0) { player?.Renderer?.VPRequest(VPRequestType.HDRtoSDR); RaiseUI(nameof(SDRDisplayNits)); } } }
-        float _SDRDisplayNitsAuto;
-
-        /// <summary>
-        /// SDR Display Peak Luminance - tonemap for HDR to SDR (Custom)
-        /// </summary>
-        public float            SDRDisplayNitsCustom        { get => _SDRDisplayNitsCustom; set { if (Set(ref _SDRDisplayNitsCustom, value)) { player?.Renderer?.VPRequest(VPRequestType.HDRtoSDR); } } }
-        float _SDRDisplayNitsCustom;
-
-        //public SwapChainFormat  SwapChainFormat             { get; set; } = SwapChainFormat.BGRA;
 
         /// <summary>
         /// Enables custom Direct2D drawing over playback frames

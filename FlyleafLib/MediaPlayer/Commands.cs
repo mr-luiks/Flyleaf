@@ -174,10 +174,9 @@ public class Commands
                 kv.Value.Value = kv.Value.Default;
         else
             foreach (var kv in cfg.FLFilters)
-                kv.Value.Value = kv.Value.Default; 
+                kv.Value.Value = kv.Value.Default;
 
-        cfg.SDRDisplayNitsCustom   = 0;
-        cfg.HDRtoSDRMethod         = HDRtoSDRMethod.Hable;
+        cfg.TargetMaxNits = 0;
     }
 
     public void SpeedSetAction(object speed)

@@ -41,6 +41,7 @@ public unsafe class VideoStream : StreamBase
 
     internal uint txtWidth, txtHeight;
     internal CropRect cropStream, Crop; // Stream Crop + Codec Padding + Texture Padding
+    internal byte[] iccData;
 
     public VideoStream(Demuxer demuxer, AVStream* st) : base(demuxer, st)
         => Type = MediaType.Video;
@@ -124,6 +125,48 @@ public unsafe class VideoStream : StreamBase
             if (cropStream != CropRect.Empty)
                 Cropping = Cropping.Stream;
         }
+
+        var iccData = av_packet_side_data_get(cp->coded_side_data, cp->nb_coded_side_data, AVPacketSideDataType.IccProfile);
+        if (iccData != null && iccData->data != null && iccData->size > 0)
+            this.iccData = new ReadOnlySpan<byte>(iccData->data, checked((int)iccData->size)).ToArray();
+
+        var doviSide = av_packet_side_data_get(cp->coded_side_data, cp->nb_coded_side_data, AVPacketSideDataType.DoviConf);
+        if (doviSide != null)
+        {
+            var dovi = (AVDOVIDecoderConfigurationRecord*) doviSide->data;
+            if (dovi != null)
+            {
+                switch (dovi->dv_profile)
+                {
+                    case 5: // Not supported
+                    case 7:
+                        ColorTransfer   = AVColorTransferCharacteristic.Smpte2084;
+                        ColorSpace      = ColorSpace.Bt2020;
+                        HDRFormat       = HDRFormat.HDR10;
+
+                        break;
+
+                    case 8:
+                        switch (dovi->dv_bl_signal_compatibility_id)
+                        {
+                            case 1:
+                                ColorTransfer   = AVColorTransferCharacteristic.Smpte2084;
+                                ColorSpace      = ColorSpace.Bt2020;
+                                HDRFormat       = HDRFormat.HDR10;
+
+                                break;
+
+                            case 4:
+                                ColorTransfer   = AVColorTransferCharacteristic.AribStdB67;
+                                ColorSpace      = ColorSpace.Bt2020;
+                                HDRFormat       = HDRFormat.HLG;
+
+                                break;
+                        }
+                        break;
+                }
+            }
+        }
     }
 
     internal override void UpdateDuration()
@@ -153,7 +196,7 @@ public unsafe class VideoStream : StreamBase
 
         if (PixelFormatDesc == null)
             AnalysePixelFormat();
-
+        
         ReUpdate();
 
         if (codecCtx->bit_rate > 0)
@@ -265,22 +308,19 @@ public unsafe class VideoStream : StreamBase
             else if (ColorRange == ColorRange.None)
                 ColorRange = ColorType == ColorType.YUV && !PixelFormatStr.Contains('j') ? ColorRange.Limited : ColorRange.Full; // yuvj family defaults to full
         }
-        
+
         if (ColorTransfer == AVColorTransferCharacteristic.AribStdB67)
-            HDRFormat = HDRFormat.HLG;
-        else if (ColorTransfer == AVColorTransferCharacteristic.Smpte2084)
         {
-            if (av_frame_get_side_data(frame, AVFrameSideDataType.DoviMetadata) != null)
-                HDRFormat = HDRFormat.DolbyVision;
-            else if (av_frame_get_side_data(frame, AVFrameSideDataType.DynamicHdrPlus) != null)
-                HDRFormat = HDRFormat.HDRPlus;
-            else
-                HDRFormat = HDRFormat.HDR;
+            HDRFormat   = HDRFormat.HLG;
+            ColorSpace  = ColorSpace.Bt2020;
         }
 
-        if (HDRFormat != HDRFormat.None) // Forcing BT.2020 with PQ/HLG transfer?
-            ColorSpace = ColorSpace.Bt2020;
-
+        else if (ColorTransfer == AVColorTransferCharacteristic.Smpte2084)// || codecCtx->colorspace == AVColorSpace.Bt2020Ncl || frame->colorspace == AVColorSpace.Bt2020Ncl)
+        {
+            HDRFormat   = HDRFormat.HDR10;
+            ColorSpace  = ColorSpace.Bt2020;
+        }
+        
         if (ColorSpace == ColorSpace.None)
         {
             if (frame->colorspace == AVColorSpace.Bt709)
@@ -323,6 +363,10 @@ public unsafe class VideoStream : StreamBase
             Rotation = (uint)(rotation - (360 * Math.Floor(rotation / 360 + 0.9 / 360)));
         }
 
+        var iccData = av_frame_side_data_get(frame->side_data, frame->nb_side_data, AVFrameSideDataType.IccProfile);
+        if (iccData != null && iccData->data != null && iccData->size > 0)
+            this.iccData = new ReadOnlySpan<byte>(iccData->data, checked((int)iccData->size)).ToArray();
+
         VFlip = frame->linesize[0] < 0;
         
         if (CanDebug)
@@ -353,5 +397,18 @@ public unsafe class VideoStream : StreamBase
         int x, y;
         _ = av_reduce(&x, &y, Width * SAR.Num, Height * SAR.Den, 1024 * 1024);
         return new(x, y);
+    }
+
+    struct AVDOVIDecoderConfigurationRecord
+    {   // TODO from bindings
+        public byte dv_version_major;
+        public byte dv_version_minor;
+        public byte dv_profile;
+        public byte dv_level;
+        public byte rpu_present_flag;
+        public byte el_present_flag;
+        public byte bl_present_flag;
+        public byte dv_bl_signal_compatibility_id;
+        public byte dv_md_compression;
     }
 }
