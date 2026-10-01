@@ -14,19 +14,19 @@ public unsafe partial class Renderer
 {
     static string[] pixelOffsets = ["r", "g", "b", "a"];
 
-    const string dYUVLimited    = "dYUVLimited";
-    const string dYUVFull       = "dYUVFull";
-    const string dYUV16         = "dYUV16";
+    internal const string dYUVLimited       = "dYUVLimited";
+    internal const string dYUVFull          = "dYUVFull";
+    internal const string dYUV16            = "dYUV16";
 
-    const string dBT1886ToLinear= "dBT1886ToLinear";
-    const string dBT2020        = "dBT2020";
-    const string dHLG           = "dHLG";
-    const string dPQSpline      = "dPQSpline";
-    const string dDovi          = "dDovi";
+    internal const string dBT1886ToLinear   = "dBT1886ToLinear";
+    internal const string dBT2020           = "dBT2020";
+    internal const string dHLG              = "dHLG";
+    internal const string dPQSpline         = "dPQSpline";
+    internal const string dDovi             = "dDovi";
 
-    const string dFilters       = "dFilters";
-    const string dPano360       = "dPano360";
-    const string dICC           = "dICC";
+    internal const string dFilters          = "dFilters";
+    internal const string dPano360          = "dPano360";
+    internal const string dICC              = "dICC";
 
     List<string> defines = [];
 
@@ -103,6 +103,8 @@ color = float4(
             isPQSpline = true;
             FLHDRDetectReset();
             FLDoviReset();
+            if (CanTrace)
+                Log.Trace(FLDoviDump(frame));
         }
         else if (scfg.ColorSpace == ColorSpace.Bt2020 && !iccApplied)
         {
@@ -128,10 +130,7 @@ color = float4(
         }
 
         if (checkHDRConfig && UsesDisplayMapping)
-        {
-            checkHDRConfig = false;
             FLUpdateTargetNits();
-        }
 
         if (canFL && VideoProcessor != VideoProcessors.SwsScale)
         {
