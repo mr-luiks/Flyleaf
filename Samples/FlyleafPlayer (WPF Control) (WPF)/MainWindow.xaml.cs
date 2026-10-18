@@ -16,6 +16,7 @@ using static FlyleafPlayer.AppConfig;
 using FlyleafLib;
 using FlyleafLib.Controls.WPF;
 using FlyleafLib.MediaPlayer;
+using Flyleaf.FFmpeg;
 
 namespace FlyleafPlayer;
 
@@ -202,7 +203,7 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         if (!Engine.Config.Loaded)
         {
             Engine.Config.LogOutput      = null;
-            Engine.Config.LogLevel       = LogLevel.Quiet;
+            Engine.Config.LogLevel       = FlyleafLib.LogLevel.Quiet;
             //Engine.Config.FFmpegDevices  = false;
 
             try { Engine.Config.Save(App.EnginePath); } catch { }
@@ -267,9 +268,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
                 if (e.Player.VideoDemuxer.Name.Contains("webm"))
                 {
-                    if (e.VideoStream.CodecID == Flyleaf.FFmpeg.AVCodecID.Vp8)
+                    if (e.VideoStream.CodecID == AVCodecID.Vp8)
                         e.Player.Config.Decoder.VideoCodec = "libvpx";
-                    else if (e.VideoStream.CodecID == Flyleaf.FFmpeg.AVCodecID.Vp9)
+                    else if (e.VideoStream.CodecID == AVCodecID.Vp9)
                         e.Player.Config.Decoder.VideoCodec = "libvpx-vp9";
                 }
             };
