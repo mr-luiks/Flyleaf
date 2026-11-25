@@ -63,6 +63,9 @@ public unsafe partial class Demuxer : RunThreadBase
                                     SubtitlesStreams{ get; private set; } = [];
     public ObservableCollection<DataStream>
                                     DataStreams     { get; private set; } = [];
+    public ObservableCollection<AttachmentStream>
+                                    AttachmentStreams { get; private set; } = [];
+
     readonly object lockStreams = new();
 
     public List<int>                EnabledStreams  { get; private set; } = [];
@@ -73,6 +76,7 @@ public unsafe partial class Demuxer : RunThreadBase
     public VideoStream              VideoStream     { get; private set; }
     public SubtitlesStream          SubtitlesStream { get; private set; }
     public DataStream               DataStream      { get; private set; }
+    public AttachmentStream         AttachmentStream { get; private set; }
 
 
     // Media Packets
@@ -180,6 +184,7 @@ public unsafe partial class Demuxer : RunThreadBase
             BindingOperations.EnableCollectionSynchronization(VideoStreams,     lockStreams);
             BindingOperations.EnableCollectionSynchronization(SubtitlesStreams, lockStreams);
             BindingOperations.EnableCollectionSynchronization(DataStreams,      lockStreams);
+            BindingOperations.EnableCollectionSynchronization(AttachmentStreams, lockStreams);
 
             BindingOperations.EnableCollectionSynchronization(Chapters,         lockStreams);
         });
@@ -265,6 +270,7 @@ public unsafe partial class Demuxer : RunThreadBase
                     VideoStreams.Clear();
                     SubtitlesStreams.Clear();
                     DataStreams.Clear();
+                    AttachmentStreams.Clear();
                     Programs.Clear();
 
                     Chapters.Clear();
@@ -687,7 +693,9 @@ public unsafe partial class Demuxer : RunThreadBase
         {
             var stream = fmtCtx->streams[i];
             stream->discard = AVDiscard.All;
-            if (stream->codecpar->codec_id == AVCodecID.None && stream->codecpar->codec_type != AVMediaType.Data)
+            if (stream->codecpar->codec_id == AVCodecID.None &&
+                stream->codecpar->codec_type != AVMediaType.Data &&
+                stream->codecpar->codec_type != AVMediaType.Attachment)
             {
                 AVStreamToStream.Add(stream->index, new MiscStream(this, stream));
                 Log.Info($"#[Invalid #{i}] No codec");
@@ -733,7 +741,11 @@ public unsafe partial class Demuxer : RunThreadBase
                 case AVMediaType.Data:
                     DataStreams.Add(new(this, stream));
                     AVStreamToStream.Add(stream->index, DataStreams[^1]);
+                    break;
 
+                case AVMediaType.Attachment:
+                    AttachmentStreams.Add(new(this, stream));
+                    AVStreamToStream.Add(stream->index, AttachmentStreams[^1]);
                     break;
 
                 default:
